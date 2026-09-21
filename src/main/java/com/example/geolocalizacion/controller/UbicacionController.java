@@ -17,6 +17,14 @@ public class UbicacionController {
     @Autowired
     private UbicacionService ubicacionService;
 
+    @GetMapping("/health")
+    public ResponseEntity<java.util.Map<String, Object>> salud() {
+        java.util.Map<String, Object> estado = new java.util.HashMap<>();
+        estado.put("status", "UP");
+        estado.put("service", "geolocalizacion");
+        return ResponseEntity.ok(estado);
+    }
+
     @PostMapping("/actualizar")
     public ResponseEntity<UbicacionPaciente> actualizarUbicacion(@RequestBody UbicacionPaciente ubicacion) {
         UbicacionPaciente guardada = ubicacionService.registrarUbicacion(ubicacion);
