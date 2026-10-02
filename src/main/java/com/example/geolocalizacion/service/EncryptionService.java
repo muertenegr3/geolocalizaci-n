@@ -1,5 +1,7 @@
 package com.example.geolocalizacion.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.encrypt.Encryptors;
 import org.springframework.security.crypto.encrypt.TextEncryptor;
@@ -31,6 +33,8 @@ import jakarta.annotation.PostConstruct;
 @Service
 public class EncryptionService {
 
+    private static final Logger log = LoggerFactory.getLogger(EncryptionService.class);
+
     @Value("${app.crypto.password}")
     private String password;
 
@@ -41,7 +45,20 @@ public class EncryptionService {
 
     @PostConstruct
     public void init() {
+        if (password == null || password.isBlank() || salt == null || salt.isBlank()) {
+            log.error("[geo] APP_CRYPTO_PASSWORD / APP_CRYPTO_SALT no definidas. El servicio "
+                    + "ARRANCARA, pero POST /api/geolocalizacion/actualizar respondera 400 "
+                    + "porque no se puede descifrar el RUN cifrado del APK. Los GET por hash "
+                    + "SHA-256 y el SSE siguen funcionando.");
+            return;
+        }
+        if (!salt.matches("^[0-9a-fA-F]+$") || salt.length() % 2 != 0) {
+            log.error("[geo] APP_CRYPTO_SALT no es una cadena HEX de longitud par; se omite "
+                    + "el descifrado. Encryptors.text interpreta el salt como HEX.");
+            return;
+        }
         this.encryptor = Encryptors.text(password, salt);
+        log.info("[geo] Descifrado AES habilitado (descifrado + SHA-256).");
     }
 
     /**
@@ -53,6 +70,9 @@ public class EncryptionService {
      * @return el RUN en texto plano, o null si el ciphertext no es valido
      */
     public String desencriptar(String datosCifrados) {
+        if (this.encryptor == null) {
+            return null;
+        }
         if (datosCifrados == null || datosCifrados.isBlank()) {
             return null;
         }
