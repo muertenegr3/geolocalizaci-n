@@ -16,17 +16,64 @@ import java.util.Optional;
 @Service
 public class UbicacionService {
 
+    /** SHA-256 en hexadecimal: exactamente 64 caracteres en [0-9a-f]. */
+    private static final String PATRON_HASH = "^[0-9a-f]{64}$";
+
     @Autowired
     private UbicacionRepository repository;
 
     @Autowired
     private HistorialGeolocalizacionRepository historialRepository;
 
+    @Autowired
+    private EncryptionService encryptionService;
+
+    /**
+     * Traduce el identificador que llega del cliente al valor realmente
+     * almacenado en la columna.
+     *
+     * El APK no tiene el RUN en texto plano: guarda en la sesion el ciphertext
+     * que devolvio el backend (login -> dbId) y ese mismo valor viaja tanto en
+     * el POST como en los GET. Por eso TODA lectura y escritura pasa por aqui:
+     * se descifra y se hashea, de modo que en la base solo exista el SHA-256.
+     *
+     * Acepta tambien un hash ya calculado, para no fallar si algun cliente
+     * cambia a enviar el hash directamente.
+     *
+     * @return el SHA-256 del RUN, o null si el valor no se puede resolver
+     */
+    private String normalizar(String identificador) {
+        if (identificador == null || identificador.isBlank()) {
+            return null;
+        }
+        String trimmed = identificador.trim();
+        if (trimmed.matches(PATRON_HASH)) {
+            return trimmed;
+        }
+        String runPlano = encryptionService.desencriptar(trimmed);
+        if (runPlano == null || runPlano.isBlank()) {
+            return null;
+        }
+        return HashUtils.HASHEO(runPlano);
+    }
+
+    /**
+     * Registra la ubicacion: una fila actual por paciente (upsert) mas una
+     * fila de historial. Ambas comparten el identificador ya hasheado.
+     */
     @Transactional
     public UbicacionPaciente registrarUbicacion(UbicacionPaciente ubicacion) {
-        LocalDateTime ahora = LocalDateTime.now();
+        String hash = normalizar(ubicacion.getRutPaciente());
+        if (hash == null) {
+            throw new IdentificadorInvalidoException(
+                    "No se pudo resolver el RUN: ciphertext invalido o credenciales APP_CRYPTO_* incorrectas");
+        }
 
-        Optional<UbicacionPaciente> existente = repository.findFirstByRutPacienteOrderByFechaReporteDesc(ubicacion.getRutPaciente());
+        LocalDateTime ahora = LocalDateTime.now();
+        ubicacion.setRutPaciente(hash);
+
+        Optional<UbicacionPaciente> existente =
+                repository.findFirstByRutPacienteOrderByFechaReporteDesc(hash);
         if (existente.isPresent()) {
             UbicacionPaciente actual = existente.get();
             actual.setLatitud(ubicacion.getLatitud());
@@ -39,7 +86,7 @@ public class UbicacionService {
         }
 
         HistorialGeolocalizacion historial = new HistorialGeolocalizacion();
-        historial.setRunPaciente(ubicacion.getRutPaciente());
+        historial.setRunPaciente(hash);
         historial.setFecha(ahora);
         historial.setHora(LocalTime.now());
         historial.setLatitud(ubicacion.getLatitud());
@@ -49,13 +96,20 @@ public class UbicacionService {
         return ubicacion;
     }
 
-    public UbicacionPaciente obtenerUltimaUbicacion(String rut) {
-        Optional<UbicacionPaciente> ubicacion = repository.findFirstByRutPacienteOrderByFechaReporteDesc(rut);
-        return ubicacion.orElse(null);
+    public UbicacionPaciente obtenerUltimaUbicacion(String identificador) {
+        String hash = normalizar(identificador);
+        if (hash == null) {
+            return null;
+        }
+        return repository.findFirstByRutPacienteOrderByFechaReporteDesc(hash).orElse(null);
     }
 
-    public List<HistorialGeolocalizacion> obtenerHistorial(String rut, Integer limite) {
+    public List<HistorialGeolocalizacion> obtenerHistorial(String identificador, Integer limite) {
+        String hash = normalizar(identificador);
+        if (hash == null) {
+            return List.of();
+        }
         int cantidad = (limite == null || limite < 1) ? 20 : Math.min(limite, 200);
-        return historialRepository.findByRunPacienteOrderByFechaDesc(rut, PageRequest.of(0, cantidad));
+        return historialRepository.findByRunPacienteOrderByFechaDesc(hash, PageRequest.of(0, cantidad));
     }
 }

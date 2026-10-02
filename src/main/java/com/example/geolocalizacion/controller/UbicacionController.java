@@ -2,12 +2,14 @@ package com.example.geolocalizacion.controller;
 
 import com.example.geolocalizacion.model.HistorialGeolocalizacion;
 import com.example.geolocalizacion.model.UbicacionPaciente;
+import com.example.geolocalizacion.service.IdentificadorInvalidoException;
 import com.example.geolocalizacion.service.UbicacionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/geolocalizacion")
@@ -25,10 +27,19 @@ public class UbicacionController {
         return ResponseEntity.ok(estado);
     }
 
+    /**
+     * Recibe el RUN cifrado que el APK tiene en su sesion, lo descifra y
+     * persiste solo el SHA-256. Si no se puede resolver, responde 400 en vez
+     * de 500, para que un fallo de APP_CRYPTO_* sea distinguible de una caida.
+     */
     @PostMapping("/actualizar")
-    public ResponseEntity<UbicacionPaciente> actualizarUbicacion(@RequestBody UbicacionPaciente ubicacion) {
-        UbicacionPaciente guardada = ubicacionService.registrarUbicacion(ubicacion);
-        return ResponseEntity.ok(guardada);
+    public ResponseEntity<?> actualizarUbicacion(@RequestBody UbicacionPaciente ubicacion) {
+        try {
+            UbicacionPaciente guardada = ubicacionService.registrarUbicacion(ubicacion);
+            return ResponseEntity.ok(guardada);
+        } catch (IdentificadorInvalidoException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     @GetMapping("/{rut}")
